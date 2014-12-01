@@ -27,6 +27,30 @@
 #include "ve.h"
 #include "rgba.h"
 
+#include <glib.h>
+#include <pthread.h>
+#include <linux/fb.h>
+
+#include <inttypes.h>
+uint64_t lasttout = 0;
+uint64_t lasttin = 0;
+
+int ploop = 1;
+
+static pthread_t presentation_thread_id;
+static GAsyncQueue *async_q = NULL;
+static void* nowvs = NULL;
+static void* oldvs = NULL;
+static void* oldtask;
+
+struct task_s {
+	uint32_t		clip_width;
+	uint32_t		clip_height;
+	VdpOutputSurface	surface;
+	VdpPresentationQueue	queue_id;
+};
+
+
 static uint64_t get_time(void)
 {
 	struct timespec tp;
@@ -132,34 +156,12 @@ VdpStatus vdp_presentation_queue_target_destroy(VdpPresentationQueueTarget prese
 		ioctl(qt->fd, DISP_CMD_LAYER_RELEASE, args);
 	}
 
+	// presentation loop end
+	ploop == 0;
+
 	close(qt->fd);
 
 	handle_destroy(presentation_queue_target);
-
-	return VDP_STATUS_OK;
-}
-
-VdpStatus vdp_presentation_queue_create(VdpDevice device,
-                                        VdpPresentationQueueTarget presentation_queue_target,
-                                        VdpPresentationQueue *presentation_queue)
-{
-	if (!presentation_queue)
-		return VDP_STATUS_INVALID_POINTER;
-
-	device_ctx_t *dev = handle_get(device);
-	if (!dev)
-		return VDP_STATUS_INVALID_HANDLE;
-
-	queue_target_ctx_t *qt = handle_get(presentation_queue_target);
-	if (!qt)
-		return VDP_STATUS_INVALID_HANDLE;
-
-	queue_ctx_t *q = handle_create(sizeof(*q), presentation_queue);
-	if (!q)
-		return VDP_STATUS_RESOURCES;
-
-	q->target = qt;
-	q->device = dev;
 
 	return VDP_STATUS_OK;
 }
@@ -238,6 +240,36 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
 
 	if (earliest_presentation_time != 0)
 		VDPAU_DBG_ONCE("Presentation time not supported");
+
+	struct task_s *task = g_slice_new0(struct task_s);
+
+	task->clip_width = clip_width;
+	task->clip_height = clip_height;
+	task->surface = surface;
+	task->queue_id = presentation_queue;
+
+	g_async_queue_push(async_q, task);
+
+	uint64_t newtin = get_time();
+	uint64_t diff_frames_in = (newtin - lasttin) / 1000;
+	printf("Differenz frame/field In: %" PRIu64"\n", diff_frames_in);
+	lasttin = newtin;
+
+	return VDP_STATUS_OK;
+}
+
+static VdpStatus do_presentation_queue_display(struct task_s *task)
+{
+	queue_ctx_t *q = handle_get(task->queue_id);
+	if (!q)
+		return VDP_STATUS_INVALID_HANDLE;
+
+	output_surface_ctx_t *os = handle_get(task->surface);
+	if (!os)
+		return VDP_STATUS_INVALID_HANDLE;
+
+	uint32_t clip_width = task->clip_width;
+	uint32_t clip_height = task->clip_height;
 
 	Window c;
 	int x,y;
@@ -384,6 +416,110 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
 		ioctl(q->target->fd, DISP_CMD_LAYER_CLOSE, args);
 	}
 
+	// many surfaces must 2 times present
+//	if (oldvs == nowvs)
+//	{
+//		return VDP_STATUS_OK;
+//	}
+	if (oldvs == nowvs)
+	{
+		printf("last surface 2 times !!!\n");
+	}
+	oldvs = nowvs;
+	nowvs = os->vs;
+	// Free Async Queue Memory
+	g_slice_free(struct task_s, oldtask);
+	oldtask = task;
+
+	return VDP_STATUS_OK;
+}
+
+static void *presentation_thread(void *param)
+{
+	int fbfd = 0;
+	uint32_t argfb = 0;
+	fbfd = open("/dev/fb0", O_RDWR);
+	if (!fbfd)
+	{
+		printf("Error: cannot open framebuffer device.\n");
+	}
+
+	// 2 surfaces must inside queue for sable start
+	gint gueue_length = g_async_queue_length(async_q);
+	while (gueue_length < 3)
+	{
+		printf("Nix in der Queue!\n");
+		usleep(20000);
+		gueue_length = g_async_queue_length(async_q);
+	}
+
+	while (ploop == 1)
+	{
+		gint gueue_length = g_async_queue_length(async_q);
+		printf("Inside Queue: %i\n", gueue_length);
+
+		// If only 2 surfaces inside queue we must take the surface 2 times
+		if (gueue_length < 3)
+		{
+			printf("Nix in der Queue!\n");
+			goto waitforvsync;
+		}
+
+		// take the task from Queue
+		struct task_s *task = g_async_queue_pop(async_q);
+//		if (task == NULL)
+//		{
+//			printf("Nix in der Queue!");
+//			usleep(1000);
+//			continue;
+//		}
+
+		waitforvsync:
+		if(ioctl(fbfd, FBIO_WAITFORVSYNC, &argfb))
+		{
+			printf("VSync failed.\n");
+		}
+
+		do_presentation_queue_display(task);
+
+	uint64_t newtout = get_time();
+	uint64_t diff_frames_out = (newtout - lasttout) / 1000;
+	printf("Differenz frame/field Out: %" PRIu64"\n", diff_frames_out);
+	lasttout = newtout;
+
+	}
+	close(fbfd);
+	void pthread_exit( void * ptr);
+}
+
+VdpStatus vdp_presentation_queue_create(VdpDevice device,
+                                        VdpPresentationQueueTarget presentation_queue_target,
+                                        VdpPresentationQueue *presentation_queue)
+{
+	if (!presentation_queue)
+		return VDP_STATUS_INVALID_POINTER;
+
+	device_ctx_t *dev = handle_get(device);
+	if (!dev)
+		return VDP_STATUS_INVALID_HANDLE;
+
+	queue_target_ctx_t *qt = handle_get(presentation_queue_target);
+	if (!qt)
+		return VDP_STATUS_INVALID_HANDLE;
+
+	queue_ctx_t *q = handle_create(sizeof(*q), presentation_queue);
+	if (!q)
+		return VDP_STATUS_RESOURCES;
+
+	q->target = qt;
+	q->device = dev;
+
+	// initialize queue and launch worker thread
+	if (!async_q) {
+		async_q = g_async_queue_new();
+		pthread_create(&presentation_thread_id, NULL, presentation_thread, NULL);
+	}
+
 	return VDP_STATUS_OK;
 }
 
@@ -398,6 +534,11 @@ VdpStatus vdp_presentation_queue_block_until_surface_idle(VdpPresentationQueue p
 	output_surface_ctx_t *out = handle_get(surface);
 	if (!out)
 		return VDP_STATUS_INVALID_HANDLE;
+
+	// old surface can go away
+	while (oldvs != out->vs){
+		usleep(500);
+	}
 
 	*first_presentation_time = get_time();
 

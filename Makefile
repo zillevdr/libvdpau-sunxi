@@ -2,15 +2,15 @@ TARGET = libvdpau_sunxi.so.1
 SRC = device.c presentation_queue.c surface_output.c surface_video.c \
 	surface_bitmap.c video_mixer.c decoder.c handles.c ve.c \
 	h264.c mpeg12.c mpeg4.c rgba.c tiled_yuv.S
-CFLAGS = -Wall -O3
+CFLAGS = -Wall -O3 $(shell pkg-config --cflags glib-2.0)
 LDFLAGS =
-LIBS = -lrt -lm -lX11 -lpthread
+LIBS = -lrt -lm -lX11 -lpthread $(shell pkg-config --libs glib-2.0)
 CC = gcc
 
 MAKEFLAGS += -rR --no-print-directory
 
 DEP_CFLAGS = -MD -MP -MQ $@
-LIB_CFLAGS = -fpic -fvisibility=hidden
+LIB_CFLAGS = -fpic
 LIB_LDFLAGS = -shared -Wl,-soname,$(TARGET)
 
 OBJ = $(addsuffix .o,$(basename $(SRC)))
