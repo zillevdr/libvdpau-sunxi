@@ -120,6 +120,8 @@ typedef struct
 	float contrast;
 	float saturation;
 	float hue;
+	uint64_t first_presentation_time;
+	VdpPresentationQueueStatus  status;
 } output_surface_ctx_t;
 
 typedef struct

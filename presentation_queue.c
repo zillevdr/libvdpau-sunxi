@@ -39,9 +39,6 @@ int ploop = 1;
 
 static pthread_t presentation_thread_id;
 static GAsyncQueue *async_q = NULL;
-static void* nowvs = NULL;
-static void* oldvs = NULL;
-static void* oldtask;
 
 struct task_s {
 	uint32_t		clip_width;
@@ -230,6 +227,7 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
                                          uint32_t clip_height,
                                          VdpTime earliest_presentation_time)
 {
+//	uint64_t newtin = get_time();
 	queue_ctx_t *q = handle_get(presentation_queue);
 	if (!q)
 		return VDP_STATUS_INVALID_HANDLE;
@@ -247,13 +245,16 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
 	task->clip_height = clip_height;
 	task->surface = surface;
 	task->queue_id = presentation_queue;
+    os->status = VDP_PRESENTATION_QUEUE_STATUS_QUEUED;
+	os->first_presentation_time = 0;
 
 	g_async_queue_push(async_q, task);
 
-	uint64_t newtin = get_time();
-	uint64_t diff_frames_in = (newtin - lasttin) / 1000;
-	printf("Differenz frame/field In: %" PRIu64"\n", diff_frames_in);
-	lasttin = newtin;
+//	uint64_t diff_outside = (newtin - lasttin) / 1000;
+//	printf("Differenz outside: %" PRIu64 "\n", diff_outside);
+//	lasttin = get_time();
+//	uint64_t diff_inside = (lasttin - newtin) / 1000;
+//	printf("Differenz inside: %" PRIu64 "\n", diff_inside);
 
 	return VDP_STATUS_OK;
 }
@@ -416,20 +417,11 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
 		ioctl(q->target->fd, DISP_CMD_LAYER_CLOSE, args);
 	}
 
-	// many surfaces must 2 times present
-//	if (oldvs == nowvs)
-//	{
-//		return VDP_STATUS_OK;
-//	}
-	if (oldvs == nowvs)
-	{
-		printf("last surface 2 times !!!\n");
-	}
-	oldvs = nowvs;
-	nowvs = os->vs;
+    os->status = VDP_PRESENTATION_QUEUE_STATUS_IDLE;
+	os->first_presentation_time = get_time();
+
 	// Free Async Queue Memory
-	g_slice_free(struct task_s, oldtask);
-	oldtask = task;
+	g_slice_free(struct task_s, task);
 
 	return VDP_STATUS_OK;
 }
@@ -444,7 +436,7 @@ static void *presentation_thread(void *param)
 		printf("Error: cannot open framebuffer device.\n");
 	}
 
-	// 2 surfaces must inside queue for sable start
+	// 2 surfaces must inside queue for stable start
 	gint gueue_length = g_async_queue_length(async_q);
 	while (gueue_length < 3)
 	{
@@ -458,23 +450,9 @@ static void *presentation_thread(void *param)
 		gint gueue_length = g_async_queue_length(async_q);
 		printf("Inside Queue: %i\n", gueue_length);
 
-		// If only 2 surfaces inside queue we must take the surface 2 times
-		if (gueue_length < 3)
-		{
-			printf("Nix in der Queue!\n");
-			goto waitforvsync;
-		}
-
 		// take the task from Queue
 		struct task_s *task = g_async_queue_pop(async_q);
-//		if (task == NULL)
-//		{
-//			printf("Nix in der Queue!");
-//			usleep(1000);
-//			continue;
-//		}
 
-		waitforvsync:
 		if(ioctl(fbfd, FBIO_WAITFORVSYNC, &argfb))
 		{
 			printf("VSync failed.\n");
@@ -527,6 +505,9 @@ VdpStatus vdp_presentation_queue_block_until_surface_idle(VdpPresentationQueue p
                                                           VdpOutputSurface surface,
                                                           VdpTime *first_presentation_time)
 {
+	if (!first_presentation_time)
+		return VDP_STATUS_INVALID_POINTER;
+
 	queue_ctx_t *q = handle_get(presentation_queue);
 	if (!q)
 		return VDP_STATUS_INVALID_HANDLE;
@@ -535,12 +516,16 @@ VdpStatus vdp_presentation_queue_block_until_surface_idle(VdpPresentationQueue p
 	if (!out)
 		return VDP_STATUS_INVALID_HANDLE;
 
-	// old surface can go away
-	while (oldvs != out->vs){
-		usleep(500);
+	// wait for VDP_PRESENTATION_QUEUE_STATUS_IDLE
+	while (out->status != VDP_PRESENTATION_QUEUE_STATUS_IDLE)
+	{
+		usleep(2000);
+		output_surface_ctx_t *out = handle_get(surface);
+		if (!out)
+			return VDP_STATUS_INVALID_HANDLE;
 	}
 
-	*first_presentation_time = get_time();
+	*first_presentation_time = out->first_presentation_time;
 
 	return VDP_STATUS_OK;
 }
@@ -550,6 +535,9 @@ VdpStatus vdp_presentation_queue_query_surface_status(VdpPresentationQueue prese
                                                       VdpPresentationQueueStatus *status,
                                                       VdpTime *first_presentation_time)
 {
+	if (!status || !first_presentation_time)
+		return VDP_STATUS_INVALID_POINTER;
+
 	queue_ctx_t *q = handle_get(presentation_queue);
 	if (!q)
 		return VDP_STATUS_INVALID_HANDLE;
@@ -558,8 +546,8 @@ VdpStatus vdp_presentation_queue_query_surface_status(VdpPresentationQueue prese
 	if (!out)
 		return VDP_STATUS_INVALID_HANDLE;
 
-	*status = VDP_PRESENTATION_QUEUE_STATUS_VISIBLE;
-	*first_presentation_time = get_time();
+	*status = out->status;
+	*first_presentation_time = out->first_presentation_time;
 
 	return VDP_STATUS_OK;
 }
