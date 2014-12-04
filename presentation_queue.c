@@ -32,8 +32,8 @@
 #include <linux/fb.h>
 
 #include <inttypes.h>
-uint64_t lasttout = 0;
-uint64_t lasttin = 0;
+//uint64_t lasttout = 0;
+//uint64_t lasttin = 0;
 
 int ploop = 1;
 
@@ -227,7 +227,6 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
                                          uint32_t clip_height,
                                          VdpTime earliest_presentation_time)
 {
-//	uint64_t newtin = get_time();
 	queue_ctx_t *q = handle_get(presentation_queue);
 	if (!q)
 		return VDP_STATUS_INVALID_HANDLE;
@@ -250,11 +249,10 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
 
 	g_async_queue_push(async_q, task);
 
-//	uint64_t diff_outside = (newtin - lasttin) / 1000;
-//	printf("Differenz outside: %" PRIu64 "\n", diff_outside);
-//	lasttin = get_time();
-//	uint64_t diff_inside = (lasttin - newtin) / 1000;
-//	printf("Differenz inside: %" PRIu64 "\n", diff_inside);
+//	uint64_t newtin = get_time();
+//	uint64_t diff_in = (newtin - lasttin) / 1000;
+//	printf("Differenz In: %" PRIu64 "\n", diff_in);
+//	lasttin = newtin;
 
 	return VDP_STATUS_OK;
 }
@@ -440,15 +438,15 @@ static void *presentation_thread(void *param)
 	gint gueue_length = g_async_queue_length(async_q);
 	while (gueue_length < 3)
 	{
-		printf("Nix in der Queue!\n");
+//		printf("Nix in der Queue!\n");
 		usleep(20000);
 		gueue_length = g_async_queue_length(async_q);
 	}
 
 	while (ploop == 1)
 	{
-		gint gueue_length = g_async_queue_length(async_q);
-		printf("Inside Queue: %i\n", gueue_length);
+//		gint gueue_length = g_async_queue_length(async_q);
+//		printf("Inside Queue: %i\n", gueue_length);
 
 		// take the task from Queue
 		struct task_s *task = g_async_queue_pop(async_q);
@@ -460,10 +458,10 @@ static void *presentation_thread(void *param)
 
 		do_presentation_queue_display(task);
 
-	uint64_t newtout = get_time();
-	uint64_t diff_frames_out = (newtout - lasttout) / 1000;
-	printf("Differenz frame/field Out: %" PRIu64"\n", diff_frames_out);
-	lasttout = newtout;
+//	uint64_t newtout = get_time();
+//	uint64_t diff_frames_out = (newtout - lasttout) / 1000;
+//	printf("Differenz frame/field Out: %" PRIu64"\n", diff_frames_out);
+//	lasttout = newtout;
 
 	}
 	close(fbfd);
