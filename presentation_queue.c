@@ -143,6 +143,7 @@ VdpStatus vdp_presentation_queue_target_destroy(VdpPresentationQueueTarget prese
 		return VDP_STATUS_INVALID_HANDLE;
 
 	uint32_t args[4] = { 0, qt->layer, 0, 0 };
+	ioctl(qt->fd, DISP_CMD_VIDEO_STOP, args);
 	ioctl(qt->fd, DISP_CMD_LAYER_CLOSE, args);
 	ioctl(qt->fd, DISP_CMD_LAYER_RELEASE, args);
 
@@ -154,7 +155,7 @@ VdpStatus vdp_presentation_queue_target_destroy(VdpPresentationQueueTarget prese
 	}
 
 	// presentation loop end
-	ploop == 0;
+	ploop = 0;
 
 	close(qt->fd);
 
@@ -244,7 +245,7 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
 	task->clip_height = clip_height;
 	task->surface = surface;
 	task->queue_id = presentation_queue;
-    os->status = VDP_PRESENTATION_QUEUE_STATUS_QUEUED;
+	os->status = VDP_PRESENTATION_QUEUE_STATUS_QUEUED;
 	os->first_presentation_time = 0;
 
 	g_async_queue_push(async_q, task);
@@ -307,9 +308,9 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
 			break;
 		}
 		layer_info.fb.br_swap = 0;
-		layer_info.fb.addr[0] = ve_virt2phys(os->yuv->data) + 0x40000000;
-		layer_info.fb.addr[1] = ve_virt2phys(os->yuv->data + os->vs->luma_size) + 0x40000000;
-		layer_info.fb.addr[2] = ve_virt2phys(os->yuv->data + os->vs->luma_size + os->vs->luma_size / 4) + 0x40000000;
+//		layer_info.fb.addr[0] = ve_virt2phys(os->yuv->data) + 0x40000000;
+//		layer_info.fb.addr[1] = ve_virt2phys(os->yuv->data + os->vs->luma_size) + 0x40000000;
+//		layer_info.fb.addr[2] = ve_virt2phys(os->yuv->data + os->vs->luma_size + os->vs->luma_size / 4) + 0x40000000;
 
 		layer_info.fb.cs_mode = DISP_BT601;
 		layer_info.fb.size.width = os->vs->width;
@@ -335,8 +336,49 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
 
 		uint32_t args[4] = { 0, q->target->layer, (unsigned long)(&layer_info), 0 };
 		ioctl(q->target->fd, DISP_CMD_LAYER_SET_PARA, args);
-
 		ioctl(q->target->fd, DISP_CMD_LAYER_OPEN, args);
+
+			static int last_id = -1;
+
+			if (last_id == -1)
+			{
+				args[1] = q->target->layer;
+				ioctl(q->target->fd, DISP_CMD_VIDEO_START, args);
+				VDPAU_DBG("DISP_CMD_VIDEO_START");
+			}
+
+			__disp_video_fb_t video;
+			memset(&video, 0, sizeof(__disp_video_fb_t));
+			video.id = last_id + 1 ;
+			video.addr[0] = ve_virt2phys(os->yuv->data) + 0x40000000;
+			video.addr[1] = ve_virt2phys(os->yuv->data + os->vs->luma_size) + 0x40000000;
+			video.addr[2] = ve_virt2phys(os->yuv->data + os->vs->luma_size + os->vs->luma_size / 4) + 0x40000000;
+//			Why is video.interlace = 0 ?
+			video.interlace = os->video_deinterlace;
+// FIXME: 576 set hard video.interlace = 1
+			if (layer_info.fb.size.width == 720)
+			{
+				video.interlace = 1;
+			}
+			video.top_field_first = os->video_field ? 0 : 1;
+		printf("video.interlace = : %i\n", video.interlace);
+		printf("video.top_field_first = : %i\n", video.top_field_first);
+		printf("fb.size.width = : %i\n", layer_info.fb.size.width);
+
+
+			args[1] = q->target->layer;
+			args[2] = (unsigned long)(&video);
+			int tmp, i = 0;
+			while ((tmp = ioctl(q->target->fd, DISP_CMD_VIDEO_GET_FRAME_ID, args)) != last_id)
+			{
+				usleep(1000);
+				if (i++ > 10)
+					return VDP_STATUS_ERROR;
+			}
+
+			ioctl(q->target->fd, DISP_CMD_VIDEO_SET_FB, args);
+			last_id++;
+
 		// Note: might be more reliable (but slower and problematic when there
 		// are driver issues and the GET functions return wrong values) to query the
 		// old values instead of relying on our internal csc_change.
@@ -489,6 +531,10 @@ VdpStatus vdp_presentation_queue_create(VdpDevice device,
 
 	q->target = qt;
 	q->device = dev;
+
+//	uint32_t args[1] = {q->target->layer};
+//	ioctl(q->target->fd, DISP_CMD_VIDEO_START, args);
+//	VDPAU_DBG("DISP_CMD_VIDEO_START");
 
 	// initialize queue and launch worker thread
 	if (!async_q) {

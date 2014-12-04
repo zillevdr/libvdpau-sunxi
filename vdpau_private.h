@@ -93,6 +93,7 @@ typedef struct
 	float contrast;
 	float saturation;
 	float hue;
+	int deinterlace;
 } mixer_ctx_t;
 
 #define RGBA_FLAG_DIRTY (1 << 0)
@@ -122,6 +123,7 @@ typedef struct
 	float hue;
 	uint64_t first_presentation_time;
 	VdpPresentationQueueStatus  status;
+	int video_deinterlace, video_field;
 } output_surface_ctx_t;
 
 typedef struct

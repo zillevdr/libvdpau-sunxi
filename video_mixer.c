@@ -123,6 +123,8 @@ VdpStatus vdp_video_mixer_render(VdpVideoMixer mixer,
 	if (layer_count != 0)
 		VDPAU_DBG_ONCE("Requested unimplemented additional layers");
 
+//	os->video_deinterlace = mix->deinterlace;
+//	os->video_field = current_picture_structure;
 
 	return VDP_STATUS_OK;
 }
@@ -264,7 +266,27 @@ VdpStatus vdp_video_mixer_query_feature_support(VdpDevice device,
 	if (!dev)
 		return VDP_STATUS_INVALID_HANDLE;
 
-	*is_supported = VDP_FALSE;
+	switch (feature)
+	{
+	case VDP_VIDEO_MIXER_FEATURE_DEINTERLACE_TEMPORAL:
+		*is_supported = VDP_TRUE;
+		break;
+	default:
+		*is_supported = VDP_FALSE;
+		break;
+	}
+
+//	int i;
+//	for (i = 0; i < feature_count; i++)
+//	{
+//		switch (features[i])
+//		{
+//		case VDP_VIDEO_MIXER_FEATURE_DEINTERLACE_TEMPORAL:
+//			mix->deinterlace = feature_enables[i];
+//			break;
+//		}
+//	}
+
 	return VDP_STATUS_OK;
 }
 
