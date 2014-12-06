@@ -290,23 +290,29 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
 			layer_info.fb.mode = DISP_MOD_INTERLEAVED;
 			layer_info.fb.format = DISP_FORMAT_YUV422;
 			layer_info.fb.seq = DISP_SEQ_YUYV;
+//			printf("VDP_YCBCR_FORMAT_YUYV\n");
 			break;
 		case VDP_YCBCR_FORMAT_UYVY:
 			layer_info.fb.mode = DISP_MOD_INTERLEAVED;
 			layer_info.fb.format = DISP_FORMAT_YUV422;
 			layer_info.fb.seq = DISP_SEQ_UYVY;
+//			printf("VDP_YCBCR_FORMAT_UYVY\n");
 			break;
 		case VDP_YCBCR_FORMAT_NV12:
 			layer_info.fb.mode = DISP_MOD_NON_MB_UV_COMBINED;
+//			printf("VDP_YCBCR_FORMAT_NV12\n");
 			break;
 		case VDP_YCBCR_FORMAT_YV12:
 			layer_info.fb.mode = DISP_MOD_NON_MB_PLANAR;
+//			printf("VDP_YCBCR_FORMAT_YV12\n");
 			break;
 		default:
 		case INTERNAL_YCBCR_FORMAT:
 			layer_info.fb.mode = DISP_MOD_MB_UV_COMBINED;
+//			printf("INTERNAL_YCBCR_FORMAT\n");
 			break;
 		}
+
 		layer_info.fb.br_swap = 0;
 //		layer_info.fb.addr[0] = ve_virt2phys(os->yuv->data) + 0x40000000;
 //		layer_info.fb.addr[1] = ve_virt2phys(os->yuv->data + os->vs->luma_size) + 0x40000000;
@@ -355,15 +361,16 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
 			video.addr[2] = ve_virt2phys(os->yuv->data + os->vs->luma_size + os->vs->luma_size / 4) + 0x40000000;
 //			Why is video.interlace = 0 ?
 			video.interlace = os->video_deinterlace;
-// FIXME: 576 set hard video.interlace = 1
-			if (layer_info.fb.size.width == 720)
+// FIXME: non 720 set hard video.interlace = 1
+			if (layer_info.fb.size.height != 720)
 			{
 				video.interlace = 1;
+				ioctl(q->target->fd, DISP_CMD_DE_FLICKER_OFF, args);
 			}
 			video.top_field_first = os->video_field ? 0 : 1;
-		printf("video.interlace = : %i\n", video.interlace);
-		printf("video.top_field_first = : %i\n", video.top_field_first);
-		printf("fb.size.width = : %i\n", layer_info.fb.size.width);
+//		printf("video.interlace = : %i\n", video.interlace);
+//		printf("video.top_field_first = : %i\n", video.top_field_first);
+//		printf("fb.size.width = : %i\n", layer_info.fb.size.width);
 
 
 			args[1] = q->target->layer;
