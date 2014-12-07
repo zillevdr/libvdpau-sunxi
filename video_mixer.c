@@ -80,9 +80,8 @@ VdpStatus vdp_video_mixer_render(VdpVideoMixer mixer,
 		VDPAU_DBG_ONCE("Requested unimplemented background_surface");
 
 
-	if (current_picture_structure != VDP_VIDEO_MIXER_PICTURE_STRUCTURE_FRAME)
-		VDPAU_DBG_ONCE("Requested unimplemented picture_structure");
-
+//	if (current_picture_structure != VDP_VIDEO_MIXER_PICTURE_STRUCTURE_FRAME)
+//		VDPAU_DBG_ONCE("Requested unimplemented picture_structure");
 
 
 	output_surface_ctx_t *os = handle_get(destination_surface);
@@ -116,15 +115,14 @@ VdpStatus vdp_video_mixer_render(VdpVideoMixer mixer,
 	os->saturation = mix->saturation;
 	os->hue = mix->hue;
 	mix->csc_change = 0;
+	os->video_deinterlace = mix->deinterlace;
+	os->video_field = current_picture_structure;
 
 	if (mix->device->osd_enabled && (os->rgba.flags & RGBA_FLAG_DIRTY))
 		os->rgba.flags |= RGBA_FLAG_NEEDS_CLEAR;
 
 	if (layer_count != 0)
 		VDPAU_DBG_ONCE("Requested unimplemented additional layers");
-
-//	os->video_deinterlace = mix->deinterlace;
-//	os->video_field = current_picture_structure;
 
 	return VDP_STATUS_OK;
 }

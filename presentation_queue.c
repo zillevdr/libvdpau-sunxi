@@ -290,33 +290,25 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
 			layer_info.fb.mode = DISP_MOD_INTERLEAVED;
 			layer_info.fb.format = DISP_FORMAT_YUV422;
 			layer_info.fb.seq = DISP_SEQ_YUYV;
-//			printf("VDP_YCBCR_FORMAT_YUYV\n");
 			break;
 		case VDP_YCBCR_FORMAT_UYVY:
 			layer_info.fb.mode = DISP_MOD_INTERLEAVED;
 			layer_info.fb.format = DISP_FORMAT_YUV422;
 			layer_info.fb.seq = DISP_SEQ_UYVY;
-//			printf("VDP_YCBCR_FORMAT_UYVY\n");
 			break;
 		case VDP_YCBCR_FORMAT_NV12:
 			layer_info.fb.mode = DISP_MOD_NON_MB_UV_COMBINED;
-//			printf("VDP_YCBCR_FORMAT_NV12\n");
 			break;
 		case VDP_YCBCR_FORMAT_YV12:
 			layer_info.fb.mode = DISP_MOD_NON_MB_PLANAR;
-//			printf("VDP_YCBCR_FORMAT_YV12\n");
 			break;
 		default:
 		case INTERNAL_YCBCR_FORMAT:
 			layer_info.fb.mode = DISP_MOD_MB_UV_COMBINED;
-//			printf("INTERNAL_YCBCR_FORMAT\n");
 			break;
 		}
 
-		layer_info.fb.br_swap = 0;
-//		layer_info.fb.addr[0] = ve_virt2phys(os->yuv->data) + 0x40000000;
-//		layer_info.fb.addr[1] = ve_virt2phys(os->yuv->data + os->vs->luma_size) + 0x40000000;
-//		layer_info.fb.addr[2] = ve_virt2phys(os->yuv->data + os->vs->luma_size + os->vs->luma_size / 4) + 0x40000000;
+//		layer_info.fb.br_swap = 0;
 
 		layer_info.fb.cs_mode = DISP_BT601;
 		layer_info.fb.size.width = os->vs->width;
@@ -344,47 +336,33 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
 		ioctl(q->target->fd, DISP_CMD_LAYER_SET_PARA, args);
 		ioctl(q->target->fd, DISP_CMD_LAYER_OPEN, args);
 
-			static int last_id = -1;
+		static int last_id = -1;
 
-			if (last_id == -1)
-			{
-				args[1] = q->target->layer;
-				ioctl(q->target->fd, DISP_CMD_VIDEO_START, args);
-				VDPAU_DBG("DISP_CMD_VIDEO_START");
-			}
-
-			__disp_video_fb_t video;
-			memset(&video, 0, sizeof(__disp_video_fb_t));
-			video.id = last_id + 1 ;
-			video.addr[0] = ve_virt2phys(os->yuv->data) + 0x40000000;
-			video.addr[1] = ve_virt2phys(os->yuv->data + os->vs->luma_size) + 0x40000000;
-			video.addr[2] = ve_virt2phys(os->yuv->data + os->vs->luma_size + os->vs->luma_size / 4) + 0x40000000;
-//			Why is video.interlace = 0 ?
-			video.interlace = os->video_deinterlace;
-// FIXME: non 720 set hard video.interlace = 1
-			if (layer_info.fb.size.height != 720)
-			{
-				video.interlace = 1;
-				ioctl(q->target->fd, DISP_CMD_DE_FLICKER_OFF, args);
-			}
-			video.top_field_first = os->video_field ? 0 : 1;
-//		printf("video.interlace = : %i\n", video.interlace);
-//		printf("video.top_field_first = : %i\n", video.top_field_first);
-//		printf("fb.size.width = : %i\n", layer_info.fb.size.width);
-
-
+		if (last_id == -1)
+		{
 			args[1] = q->target->layer;
-			args[2] = (unsigned long)(&video);
-			int tmp, i = 0;
-			while ((tmp = ioctl(q->target->fd, DISP_CMD_VIDEO_GET_FRAME_ID, args)) != last_id)
-			{
-				usleep(1000);
-				if (i++ > 10)
-					return VDP_STATUS_ERROR;
-			}
-
-			ioctl(q->target->fd, DISP_CMD_VIDEO_SET_FB, args);
+			ioctl(q->target->fd, DISP_CMD_VIDEO_START, args);
+			VDPAU_DBG("DISP_CMD_VIDEO_START");
 			last_id++;
+		}
+
+		__disp_video_fb_t video;
+		memset(&video, 0, sizeof(__disp_video_fb_t));
+		video.addr[0] = ve_virt2phys(os->yuv->data) + 0x40000000;
+		video.addr[1] = ve_virt2phys(os->yuv->data + os->vs->luma_size) + 0x40000000;
+		video.addr[2] = ve_virt2phys(os->yuv->data + os->vs->luma_size + os->vs->luma_size / 4) + 0x40000000;
+
+		video.top_field_first = os->video_field ? 0 : 1;
+		//If top_field_first toggle video.interlace = 1
+		static int last_top_field_first;
+		video.interlace = os->video_deinterlace;
+		if (last_top_field_first != video.top_field_first)
+			video.interlace = 1;
+		last_top_field_first = video.top_field_first;
+
+		args[1] = q->target->layer;
+		args[2] = (unsigned long)(&video);
+		ioctl(q->target->fd, DISP_CMD_VIDEO_SET_FB, args);
 
 		// Note: might be more reliable (but slower and problematic when there
 		// are driver issues and the GET functions return wrong values) to query the
