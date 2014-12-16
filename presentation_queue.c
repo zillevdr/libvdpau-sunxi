@@ -35,8 +35,6 @@
 //uint64_t lasttout = 0;
 //uint64_t lasttin = 0;
 
-int ploop = 1;
-
 static pthread_t presentation_thread_id;
 static GAsyncQueue *async_q = NULL;
 
@@ -155,7 +153,7 @@ VdpStatus vdp_presentation_queue_target_destroy(VdpPresentationQueueTarget prese
 	}
 
 	// presentation loop end
-	ploop = 0;
+	int pthread_cancel (pthread_t presentation_thread_id);
 
 	close(qt->fd);
 
@@ -308,8 +306,7 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
 			break;
 		}
 
-//		layer_info.fb.br_swap = 0;
-
+		layer_info.fb.br_swap = 0;
 		layer_info.fb.cs_mode = DISP_BT601;
 		layer_info.fb.size.width = os->vs->width;
 		layer_info.fb.size.height = os->vs->height;
@@ -359,6 +356,7 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
 		if (last_top_field_first != video.top_field_first)
 			video.interlace = 1;
 		last_top_field_first = video.top_field_first;
+		video.pre_frame_valid = 1;
 
 		args[1] = q->target->layer;
 		args[2] = (unsigned long)(&video);
@@ -453,6 +451,7 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
 
 static void *presentation_thread(void *param)
 {
+	pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, NULL);
 	int fbfd = 0;
 	uint32_t argfb = 0;
 	fbfd = open("/dev/fb0", O_RDWR);
@@ -470,7 +469,7 @@ static void *presentation_thread(void *param)
 		gueue_length = g_async_queue_length(async_q);
 	}
 
-	while (ploop == 1)
+	while (1)
 	{
 //		gint gueue_length = g_async_queue_length(async_q);
 //		printf("Inside Queue: %i\n", gueue_length);
@@ -492,7 +491,7 @@ static void *presentation_thread(void *param)
 
 	}
 	close(fbfd);
-	void pthread_exit( void * ptr);
+	return 0;
 }
 
 VdpStatus vdp_presentation_queue_create(VdpDevice device,
