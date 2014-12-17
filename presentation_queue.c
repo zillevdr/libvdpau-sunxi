@@ -350,12 +350,15 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
 		video.addr[2] = ve_virt2phys(os->yuv->data + os->vs->luma_size + os->vs->luma_size / 4) + 0x40000000;
 
 		video.top_field_first = os->video_field ? 0 : 1;
-		//If top_field_first toggle video.interlace = 1
-		static int last_top_field_first;
+//		Why is video.interlace = 0 ?
 		video.interlace = os->video_deinterlace;
-		if (last_top_field_first != video.top_field_first)
+// FIXME: non 720 set hard video.interlace = 1
+		if (layer_info.fb.size.height != 720)
+		{
 			video.interlace = 1;
-		last_top_field_first = video.top_field_first;
+		}
+//		printf("video.interlace = : %i\n", video.interlace);
+		video.top_field_first = os->video_field ? 0 : 1;
 		video.pre_frame_valid = 1;
 
 		args[1] = q->target->layer;
