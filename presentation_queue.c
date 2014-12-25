@@ -475,7 +475,6 @@ static void *presentation_thread(void *param)
 		// take the task from Queue
 		if (QueuePop(&queue, &task) != QUEUE_SUCCESS) {
 			// queue is empty!
-			break;
 		}
 
 		if(ioctl(fbfd, FBIO_WAITFORVSYNC, &argfb))
