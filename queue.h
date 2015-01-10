@@ -19,10 +19,8 @@
 
 #include <inttypes.h>
 #include <vdpau/vdpau.h>
-
-
-#define         QUEUE_LEN	16 				// has to be 2^n
-#define         QUEUE_MASK	(QUEUE_LEN - 1)
+#include <stdlib.h>
+#include <pthread.h>
 
 
 typedef struct {
@@ -37,20 +35,26 @@ typedef struct {
 typedef enum {
 	QUEUE_SUCCESS,
 	QUEUE_FULL,
-	QUEUE_EMPTY
+	QUEUE_EMPTY,
+	QUEUE_INIT_ERROR
 }eQueueError;
 
 
 typedef struct
 {
-	Task_Struct data[QUEUE_LEN];// data
-	uint8_t InIndex; 			// next input position
-	uint8_t OutIndex; 			// read position
-	uint8_t count;				// number of entries
+	void *buffer;			// data buffer
+	void *buffer_end;		// end of buffer
+	size_t item_count;		// number of items in the buffer
+	size_t item_max;		// max number of items in the buffer
+	size_t item_size;		// size of single item
+	void *input ; 			// input position
+	void *output;			// output position
+	pthread_mutex_t mutex;  // mutex to make queue thread-safe
 }Queue_Struct;
 
 
-void QueueInit(Queue_Struct * queue);
-eQueueError QueuePush(Queue_Struct * queue, Task_Struct data);
-eQueueError QueuePop(Queue_Struct * queue, Task_Struct * ptr_data);
-uint32_t QueueLength(Queue_Struct * queue);
+eQueueError QueueInit(Queue_Struct * queue, size_t num_elems, size_t obj_size);
+void QueueFree(Queue_Struct * queue);
+eQueueError QueuePush(Queue_Struct * queue, const void *data);
+eQueueError QueuePop(Queue_Struct * queue, void *data);
+size_t QueueLength(Queue_Struct * queue);

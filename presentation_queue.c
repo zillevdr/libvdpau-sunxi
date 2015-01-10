@@ -36,7 +36,7 @@
 //uint64_t lasttin = 0;
 
 static pthread_t presentation_thread_id;
-Queue_Struct queue;
+static Queue_Struct queue;
 
 
 static uint64_t get_time(void)
@@ -151,6 +151,8 @@ VdpStatus vdp_presentation_queue_target_destroy(VdpPresentationQueueTarget prese
 	close(qt->fd);
 
 	handle_destroy(presentation_queue_target);
+	// free buffer memory
+	QueueFree(&queue);
 
 	return VDP_STATUS_OK;
 }
@@ -239,7 +241,7 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
 	os->status = VDP_PRESENTATION_QUEUE_STATUS_QUEUED;
 	os->first_presentation_time = 0;
 
-	if (QueuePush(&queue, task_in) != QUEUE_SUCCESS) {
+	if (QueuePush(&queue, (Task_Struct*)&task_in) != QUEUE_SUCCESS) {
 		// queue is full!
 		return VDP_STATUS_ERROR;
 	}
@@ -473,16 +475,17 @@ static void *presentation_thread(void *param)
 //		printf("Inside Queue: %i\n", queue_length);
 
 		// take the task from Queue
-		if (QueuePop(&queue, &task) != QUEUE_SUCCESS) {
-			// queue is empty!
+		if (QueuePop(&queue, (Task_Struct*)&task) != QUEUE_EMPTY) {
+			// display only if data available
+			if(ioctl(fbfd, FBIO_WAITFORVSYNC, &argfb))
+			{
+				printf("VSync failed.\n");
+			}
+			do_presentation_queue_display(&task);
 		}
-
-		if(ioctl(fbfd, FBIO_WAITFORVSYNC, &argfb))
-		{
-			printf("VSync failed.\n");
+		else {
+		//queue is empty
 		}
-
-		do_presentation_queue_display(&task);
 
 //	uint64_t newtout = get_time();
 //	uint64_t diff_frames_out = (newtout - lasttout) / 1000;
@@ -521,14 +524,14 @@ VdpStatus vdp_presentation_queue_create(VdpDevice device,
 //	VDPAU_DBG("DISP_CMD_VIDEO_START");
 
 	// initialize queue and launch worker thread
-	QueueInit(&queue);
+	if (QueueInit(&queue, 8, sizeof(Task_Struct)) != QUEUE_SUCCESS) {
+		// Queue Init error
+		printf("Unable to initialize queue!");
+		return VDP_STATUS_INVALID_HANDLE;
+	}
+
 	pthread_create(&presentation_thread_id, NULL, presentation_thread, NULL);
 
-//	if (!async_q) {
-//		async_q = g_async_queue_new();
-//
-//		pthread_create(&presentation_thread_id, NULL, presentation_thread, NULL);
-//	}
 
 	return VDP_STATUS_OK;
 }

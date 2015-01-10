@@ -17,43 +17,107 @@
  *
  */
 
-#include "queue.h"
 #include <inttypes.h>
 #include <string.h>
+#include <stdlib.h>
+#include "queue.h"
 
-eQueueError QueuePush(Queue_Struct * queue, Task_Struct data)
+#undef DEBUG_INFO
+#define DEBUG_ERROR
+
+#if defined (DEBUG_ERROR) || defined (DEBUG_INFO)
+  #include <stdio.h>
+#endif
+
+eQueueError QueueInit(Queue_Struct * queue, size_t num_elems, size_t obj_size)
 {
-	uint8_t next = ((queue->InIndex + 1) & QUEUE_MASK);
-	if (queue->OutIndex == next) {
-		queue->count = QUEUE_LEN;
+	queue->buffer = malloc(obj_size * num_elems);
+	if(queue->buffer == NULL) {
+		// no memory available
+		#ifdef DEBUG_ERROR
+		printf("ERROR: no memory available!\n");
+		#endif
+		return QUEUE_INIT_ERROR;
+	}
+	// init Queue-Structure
+	queue->buffer_end = (char *)queue->buffer + obj_size * num_elems;
+	queue->item_max = num_elems;
+	queue->item_count = 0;
+	queue->item_size = obj_size;
+	queue->input = queue->buffer;
+	queue->output = queue->buffer;
+
+	pthread_mutex_init(&queue->mutex, NULL);
+
+	return QUEUE_SUCCESS;
+}
+
+void QueueFree(Queue_Struct * queue)
+{
+	#ifdef DEBUG_INFO
+	printf("INFO_FREE: memory freed!\n");
+	#endif
+	free(queue->buffer);
+}
+
+eQueueError QueuePush(Queue_Struct * queue, const void *data)
+{
+	pthread_mutex_lock(&queue->mutex);
+	if(queue->item_count == queue->item_max) {
+		// queue is full
+		#ifdef DEBUG_ERROR
+		printf("ERROR: queue full!\n");
+		#endif
+		pthread_mutex_unlock(&queue->mutex);
 		return QUEUE_FULL;
 	}
-	queue->data[queue->InIndex] = data;
-	queue->InIndex = next;
-	queue->count++;
+	// copy data into buffer
+	memcpy(queue->input, data, queue->item_size);
+	queue->input = (char*)queue->input + queue->item_size;
+	if(queue->input == queue->buffer_end) {
+		// reached end of buffer, so start at beginning
+		queue->input = queue->buffer;
+	}
+	queue->item_count++;
+	#ifdef DEBUG_INFO
+	printf("INFO_PUSH: queue items: %i \n",queue->item_count);
+	#endif
+	pthread_mutex_unlock(&queue->mutex);
 	return QUEUE_SUCCESS;
 }
 
-eQueueError QueuePop(Queue_Struct * queue, Task_Struct * ptr_data)
+
+eQueueError QueuePop(Queue_Struct * queue, void *data)
 {
-	if (queue->OutIndex == queue->InIndex) {
-		queue->count = 0;
+	pthread_mutex_lock(&queue->mutex);
+	if(queue->item_count == 0) {
+		// queue is empty
+		#ifdef DEBUG_ERROR
+		printf("ERROR: queue empty!\n");
+		#endif
+		pthread_mutex_unlock(&queue->mutex);
 		return QUEUE_EMPTY;
 	}
-	*ptr_data = queue->data[queue->OutIndex];
-	queue->OutIndex = (queue->OutIndex+1) & QUEUE_MASK;
-	queue->count--;
+	// get data from buffer
+	memcpy(data, queue->output, queue->item_size);
+	queue->output = (char*)queue->output + queue->item_size;
+	if(queue->output == queue->buffer_end) {
+		// reached end of buffer, so start at beginning
+		queue->output = queue->buffer;
+	}
+	queue->item_count--;
+	#ifdef DEBUG_INFO
+	printf("INFO_POP: queue items: %i \n",queue->item_count);
+	#endif
+	pthread_mutex_unlock(&queue->mutex);
 	return QUEUE_SUCCESS;
 }
 
-uint32_t QueueLength(Queue_Struct * queue)
+size_t QueueLength(Queue_Struct * queue)
 {
-	return queue->count;
+	return queue->item_count;
 }
 
-void QueueInit(Queue_Struct * queue)
-{
-	memset(queue, 0, sizeof(Queue_Struct));
-}
+
 
 
