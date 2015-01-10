@@ -27,23 +27,16 @@
 #include "ve.h"
 #include "rgba.h"
 
-#include <glib.h>
 #include <pthread.h>
 #include <linux/fb.h>
 
 #include <inttypes.h>
+#include "queue.h"
 //uint64_t lasttout = 0;
 //uint64_t lasttin = 0;
 
 static pthread_t presentation_thread_id;
-static GAsyncQueue *async_q = NULL;
-
-struct task_s {
-	uint32_t		clip_width;
-	uint32_t		clip_height;
-	VdpOutputSurface	surface;
-	VdpPresentationQueue	queue_id;
-};
+static Queue_Struct queue;
 
 
 static uint64_t get_time(void)
@@ -158,6 +151,8 @@ VdpStatus vdp_presentation_queue_target_destroy(VdpPresentationQueueTarget prese
 	close(qt->fd);
 
 	handle_destroy(presentation_queue_target);
+	// free buffer memory
+	QueueFree(&queue);
 
 	return VDP_STATUS_OK;
 }
@@ -226,6 +221,7 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
                                          uint32_t clip_height,
                                          VdpTime earliest_presentation_time)
 {
+	Task_Struct task_in;
 	queue_ctx_t *q = handle_get(presentation_queue);
 	if (!q)
 		return VDP_STATUS_INVALID_HANDLE;
@@ -237,16 +233,18 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
 	if (earliest_presentation_time != 0)
 		VDPAU_DBG_ONCE("Presentation time not supported");
 
-	struct task_s *task = g_slice_new0(struct task_s);
 
-	task->clip_width = clip_width;
-	task->clip_height = clip_height;
-	task->surface = surface;
-	task->queue_id = presentation_queue;
+	task_in.clip_width = clip_width;
+	task_in.clip_height = clip_height;
+	task_in.surface = surface;
+	task_in.queue_id = presentation_queue;
 	os->status = VDP_PRESENTATION_QUEUE_STATUS_QUEUED;
 	os->first_presentation_time = 0;
 
-	g_async_queue_push(async_q, task);
+	if (QueuePush(&queue, (Task_Struct*)&task_in) != QUEUE_SUCCESS) {
+		// queue is full!
+		return VDP_STATUS_ERROR;
+	}
 
 //	uint64_t newtin = get_time();
 //	uint64_t diff_in = (newtin - lasttin) / 1000;
@@ -256,7 +254,7 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
 	return VDP_STATUS_OK;
 }
 
-static VdpStatus do_presentation_queue_display(struct task_s *task)
+static VdpStatus do_presentation_queue_display(Task_Struct *task)
 {
 	queue_ctx_t *q = handle_get(task->queue_id);
 	if (!q)
@@ -446,15 +444,14 @@ static VdpStatus do_presentation_queue_display(struct task_s *task)
     os->status = VDP_PRESENTATION_QUEUE_STATUS_IDLE;
 	os->first_presentation_time = get_time();
 
-	// Free Async Queue Memory
-	g_slice_free(struct task_s, task);
-
 	return VDP_STATUS_OK;
 }
 
 static void *presentation_thread(void *param)
 {
 	pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, NULL);
+	Task_Struct task;
+
 	int fbfd = 0;
 	uint32_t argfb = 0;
 	fbfd = open("/dev/fb0", O_RDWR);
@@ -464,28 +461,31 @@ static void *presentation_thread(void *param)
 	}
 
 	// 2 surfaces must inside queue for stable start
-	gint gueue_length = g_async_queue_length(async_q);
-	while (gueue_length < 3)
+	uint32_t queue_length = QueueLength(&queue);
+	while (queue_length < 3)
 	{
 //		printf("Nix in der Queue!\n");
 		usleep(20000);
-		gueue_length = g_async_queue_length(async_q);
+		queue_length = QueueLength(&queue);
 	}
 
 	while (1)
 	{
-//		gint gueue_length = g_async_queue_length(async_q);
-//		printf("Inside Queue: %i\n", gueue_length);
+//		queue_length = QueueLength(&queue);
+//		printf("Inside Queue: %i\n", queue_length);
 
 		// take the task from Queue
-		struct task_s *task = g_async_queue_pop(async_q);
-
-		if(ioctl(fbfd, FBIO_WAITFORVSYNC, &argfb))
-		{
-			printf("VSync failed.\n");
+		if (QueuePop(&queue, (Task_Struct*)&task) != QUEUE_EMPTY) {
+			// display only if data available
+			if(ioctl(fbfd, FBIO_WAITFORVSYNC, &argfb))
+			{
+				printf("VSync failed.\n");
+			}
+			do_presentation_queue_display(&task);
 		}
-
-		do_presentation_queue_display(task);
+		else {
+		//queue is empty
+		}
 
 //	uint64_t newtout = get_time();
 //	uint64_t diff_frames_out = (newtout - lasttout) / 1000;
@@ -524,10 +524,14 @@ VdpStatus vdp_presentation_queue_create(VdpDevice device,
 //	VDPAU_DBG("DISP_CMD_VIDEO_START");
 
 	// initialize queue and launch worker thread
-	if (!async_q) {
-		async_q = g_async_queue_new();
-		pthread_create(&presentation_thread_id, NULL, presentation_thread, NULL);
+	if (QueueInit(&queue, 8, sizeof(Task_Struct)) != QUEUE_SUCCESS) {
+		// Queue Init error
+		printf("Unable to initialize queue!");
+		return VDP_STATUS_INVALID_HANDLE;
 	}
+
+	pthread_create(&presentation_thread_id, NULL, presentation_thread, NULL);
+
 
 	return VDP_STATUS_OK;
 }
