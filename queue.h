@@ -21,9 +21,12 @@
 #include <vdpau/vdpau.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <time.h>
+
 
 
 typedef struct {
+	struct timespec		    when;
 	uint32_t				clip_width;
 	uint32_t				clip_height;
 	VdpOutputSurface		surface;

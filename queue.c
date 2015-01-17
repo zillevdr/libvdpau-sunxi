@@ -23,7 +23,7 @@
 #include "queue.h"
 
 #undef DEBUG_INFO
-#define DEBUG_ERROR
+#undef DEBUG_ERROR
 
 #if defined (DEBUG_ERROR) || defined (DEBUG_INFO)
   #include <stdio.h>
@@ -58,6 +58,7 @@ void QueueFree(Queue_Struct * queue)
 	printf("INFO_FREE: memory freed!\n");
 	#endif
 	free(queue->buffer);
+	pthread_mutex_destroy(&queue->mutex);
 }
 
 eQueueError QueuePush(Queue_Struct * queue, const void *data)

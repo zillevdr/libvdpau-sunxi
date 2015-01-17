@@ -49,6 +49,22 @@ static uint64_t get_time(void)
 	return (uint64_t)tp.tv_sec * 1000000000ULL + (uint64_t)tp.tv_nsec;
 }
 
+
+/*static VdpTime
+timespec2vdptime(struct timespec t)
+{
+	return (uint64_t)t.tv_sec * 1000 * 1000 * 1000 + t.tv_nsec;
+} */
+
+static struct timespec
+vdptime2timespec(VdpTime t)
+{
+	struct timespec res;
+	res.tv_sec = t / (1000*1000*1000);
+	res.tv_nsec = t % (1000*1000*1000);
+	return res;
+}
+
 VdpStatus vdp_presentation_queue_target_create_x11(VdpDevice device,
                                                    Drawable drawable,
                                                    VdpPresentationQueueTarget *target)
@@ -230,10 +246,13 @@ VdpStatus vdp_presentation_queue_display(VdpPresentationQueue presentation_queue
 	if (!os)
 		return VDP_STATUS_INVALID_HANDLE;
 
-	if (earliest_presentation_time != 0)
-		VDPAU_DBG_ONCE("Presentation time not supported");
-
-
+	if (earliest_presentation_time != 0) {
+		task_in.when = vdptime2timespec(earliest_presentation_time);
+	}
+	else {
+		task_in.when.tv_sec = 0;
+		task_in.when.tv_nsec = 0;
+	}
 	task_in.clip_width = clip_width;
 	task_in.clip_height = clip_height;
 	task_in.surface = surface;
@@ -451,6 +470,8 @@ static void *presentation_thread(void *param)
 {
 	pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, NULL);
 	Task_Struct task;
+	int64_t timeout;
+	struct timespec now;
 
 	int fbfd = 0;
 	uint32_t argfb = 0;
@@ -458,41 +479,40 @@ static void *presentation_thread(void *param)
 	if (!fbfd)
 	{
 		printf("Error: cannot open framebuffer device.\n");
-	}
-
-	// 2 surfaces must inside queue for stable start
-	uint32_t queue_length = QueueLength(&queue);
-	while (queue_length < 3)
-	{
-//		printf("Nix in der Queue!\n");
-		usleep(20000);
-		queue_length = QueueLength(&queue);
+		return 0;
 	}
 
 	while (1)
 	{
-//		queue_length = QueueLength(&queue);
-//		printf("Inside Queue: %i\n", queue_length);
 
+		if(ioctl(fbfd, FBIO_WAITFORVSYNC, &argfb))
+		{
+			printf("VSync failed.\n");
+		}
+		
 		// take the task from Queue
 		if (QueuePop(&queue, (Task_Struct*)&task) != QUEUE_EMPTY) {
-			// display only if data available
-			if(ioctl(fbfd, FBIO_WAITFORVSYNC, &argfb))
-			{
-				printf("VSync failed.\n");
-			}
+			// display only if data available		
+			if (task.when.tv_sec != 0 && task.when.tv_nsec != 0) {
+				// check if persentiation time is supported and wait
+				do {
+					clock_gettime(CLOCK_REALTIME, &now);
+					// timeout is the difference between now and scheduled time
+					timeout = (task.when.tv_sec - now.tv_sec) * 1000 * 1000 + (task.when.tv_nsec - now.tv_nsec) / 1000;
+				} while(timeout <= 0); 
+			}		
 			do_presentation_queue_display(&task);
 		}
 		else {
-		//queue is empty
+			//queue is empty
 		}
+	}
 
 //	uint64_t newtout = get_time();
 //	uint64_t diff_frames_out = (newtout - lasttout) / 1000;
 //	printf("Differenz frame/field Out: %" PRIu64"\n", diff_frames_out);
 //	lasttout = newtout;
 
-	}
 	close(fbfd);
 	return 0;
 }
